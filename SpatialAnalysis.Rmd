@@ -1,0 +1,233 @@
+---
+title: "Spatial Analysis"
+author: "Tirth Gandhi"
+date: "2024-07-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Spatial Analysis
+
+
+```{r data}
+data=read.csv("./Data/311_analysis_data.csv")
+
+```
+
+
+First, let's examine exactly how much of NYC uses a 311 hotline by just plotting all available latitudes and longitudes. 
+```{r map}
+library(ggplot2)
+ggplot(data) +
+  geom_point(aes(x=Longitude,y=Latitude),size=0.1)
+
+```
+The 311 hotline is used all over NYC and is very popular amongst all NYC residents. Next, we will examine the duration where applicable. 
+```{r Map of NYC and duration}
+# Load necessary libraries
+library(tigris)
+library(tmap)
+library(sf)
+library(dplyr)
+
+
+# Subset and preprocess the data
+subset_data <- data[, c("Latitude", "Longitude", "Duration")]
+subset_data$Duration <- abs(subset_data$Duration)
+subset_data <- na.omit(subset_data)
+
+# Define the thresholds
+threshold1 <- 1440   # 1 day (24 hours)
+threshold2 <- 10080  # 1 week (7 days)
+
+# Create a new column for color coding based on the thresholds
+subset_data$ColorGroup <- cut(subset_data$Duration,
+  breaks = c(-Inf, threshold1, threshold2, Inf),
+  labels = c("Within 1 Day", "1 Day to 1 Week", "Beyond 1 Week")
+)
+
+# Convert the subsetted data frame to a spatial points data frame
+subset_data_sf <- st_as_sf(subset_data, coords = c("Longitude", "Latitude"), crs = 4326)
+
+# List of NYC counties corresponding to the five boroughs
+nyc_counties <- c("New York", "Kings", "Bronx", "Queens", "Richmond")
+
+# Get the tract data for all NYC counties
+nyc_tracts <- do.call(rbind, lapply(nyc_counties, function(county) {
+  tracts(state = 'NY', county = county, cb = TRUE)
+}))
+
+# Plot the tracts and points using tmap
+tm_shape(nyc_tracts) +
+  tm_borders() +
+  tm_shape(subset_data_sf) +
+  tm_dots(col = "ColorGroup", size = 0.1, alpha = 0.5,
+          palette = c("Within 1 Day" = "lightblue", "1 Day to 1 Week" = "orange", "Beyond 1 Week" = "red"), 
+          title = "Duration (minutes)")
+
+
+
+```
+The duration is varied because most complaints take a long time to resolve. Let's examine what complaint types take longer than 24 hours to resolve.
+
+```{r}
+filtered_data <- data %>% filter(Duration > 1440 & Duration < 10080)
+
+# Count the occurrences of each Complaint.Type
+complaint_counts <- filtered_data %>%
+  group_by(Complaint.Type) %>%
+  summarise(Count = n()) %>%
+  ungroup() %>%
+  arrange(desc(Count)) %>%
+  slice(1:10)
+complaint_counts
+
+```
+```{r Proportion of Complaints taking longer than 24 hours and less than 1 week}
+sum(data$Duration>1440,na.rm=TRUE)/length(data$Duration)-sum(data$Duration>10080,na.rm=TRUE)/length(data$Duration)
+
+```
+```{r Longer than a Week, any overlaps}
+filtered_data <- data %>% filter(Duration > 10080)
+
+# Count the occurrences of each Complaint.Type
+complaint_counts <- filtered_data %>%
+  group_by(Complaint.Type) %>%
+  summarise(Count = n()) %>%
+  ungroup() %>%
+  arrange(desc(Count)) %>%
+  slice(1:10)
+complaint_counts
+
+```
+
+```{r}
+sum(data$Duration>10080,na.rm=TRUE)/length(data$Duration)
+```
+```{r}
+# Filter for cases with ratio_200K_or_more > 0.1
+combined_subset <- nrow(data[data$Status == "Closed" & data$Duration < 1440 & data$ratio_200K_or_more > 0.1, ])
+# Count rows with Status == "Closed", Duration between 1440 and 10080, and ratio_200K_or_more > 0.1
+combined_subset_2 <- nrow(data[data$Status == "Closed" & data$Duration >= 1440 & data$Duration < 10080 & data$ratio_200K_or_more > 0.1, ])
+# Count rows with Status == "Closed", Duration > 10080, and ratio_200K_or_more > 0.1
+combined_subset_3 <- nrow(data[data$Status == "Closed" & data$Duration > 10080 & data$ratio_200K_or_more > 0.1, ])
+# Count rows with Status == "Closed", Duration < 1440, and ratio_200K_or_more < 0.1
+combined_subset_4 <- nrow(data[data$Status == "Closed" & data$Duration < 1440 & data$ratio_200K_or_more < 0.1, ])
+# Count rows with Status == "Closed", Duration between 1440 and 10080, and ratio_200K_or_more < 0.1
+combined_subset_5 <- nrow(data[data$Status == "Closed" & data$Duration >= 1440 & data$Duration < 10080 & data$ratio_200K_or_more < 0.1, ])
+# Count rows with Status == "Closed", Duration > 10080, and ratio_200K_or_more < 0.1
+combined_subset_6 <- nrow(data[data$Status == "Closed" & data$Duration > 10080 & data$ratio_200K_or_more < 0.1, ])
+combined_subset/combined_subset_4
+combined_subset_2/combined_subset_5
+combined_subset_3/combined_subset_6
+
+```
+```{r}
+mean_duration_1 <- mean(data[data$Status == "Closed" & data$Duration < 1440 & data$ratio_200K_or_more > 0.1, "Duration"], na.rm = TRUE)
+mean_duration_2 <- mean(data[data$Status == "Closed" & data$Duration >= 1440 & data$Duration < 10080 & data$ratio_200K_or_more > 0.1, "Duration"], na.rm = TRUE)
+mean_duration_3 <- mean(data[data$Status == "Closed" & data$Duration > 10080 & data$ratio_200K_or_more > 0.1, "Duration"], na.rm = TRUE)
+mean_duration_4 <- mean(data[data$Status == "Closed" & data$Duration < 1440 & data$ratio_200K_or_more < 0.1, "Duration"], na.rm = TRUE)
+mean_duration_5 <- mean(data[data$Status == "Closed" & data$Duration >= 1440 & data$Duration < 10080 & data$ratio_200K_or_more < 0.1, "Duration"], na.rm = TRUE)
+mean_duration_6 <- mean(data[data$Status == "Closed" & data$Duration > 10080 & data$ratio_200K_or_more < 0.1, "Duration"], na.rm = TRUE)
+mean_duration_1/mean_duration_4
+mean_duration_2/mean_duration_5
+mean_duration_3/mean_duration_6
+
+```
+Let's shift our focus from duration to which locations are causing the most complaints by plotting the number of times a particular location appears. 
+```{r }
+library(dplyr)
+library(sf)
+library(tmap)
+
+# Calculate location counts and apply threshold
+location_counts <- data %>%
+  group_by(Latitude, Longitude) %>%
+  summarise(Count = n()) %>%
+  ungroup()
+
+location_counts <- na.omit(location_counts)
+
+# Define threshold and add ColorGroup and SizeGroup
+threshold <- 100
+location_counts <- location_counts %>%
+  mutate(
+    ColorGroup = ifelse(Count > threshold, "Above 100 Complaints", "Below 100 Complaints"),
+    SizeGroup = ifelse(Count > threshold, 2, 0.1)
+  )
+
+# Convert to sf object
+location_counts_sf <- st_as_sf(location_counts, coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Define color palette with fixed colors
+color_palette <- c("Below 100 Complaints" = "lightblue", 
+                   "Above 100 Complaints" = "darkred")
+
+# Plot the data using tmap
+tm_shape(location_counts_sf) +
+  tm_dots(size = "SizeGroup", col = "ColorGroup", palette = color_palette, title = "Complaints per Location") +
+  tm_layout(title = "Complaint by Location Counts", title.size = 1)
+
+
+
+```
+The most problematic areas are near bodies of water where more people are gathered which is consistent with our prior findings and near public spaces like parks, even the few darkred spots in-land are near public spaces or business districts when you cross-verify with Google Maps. Below is a direct comparison about other related factors with respect to Complaints per location.  
+
+
+
+
+
+
+
+```{r Direct Comparison}
+problematic_locations <- location_counts %>%
+  filter(ColorGroup == "Above 100 Complaints")
+
+non_problematic_locations <- location_counts %>%
+  filter(ColorGroup == "Below 100 Complaints")
+
+# Merge with original data
+merged_problematic <- data %>%
+  right_join(problematic_locations, by = c("Latitude", "Longitude"))
+
+merged_non_problematic <- data %>%
+  right_join(non_problematic_locations, by = c("Latitude", "Longitude"))
+
+# Select relevant columns and calculate summary statistics
+calculate_summary <- function(df) {
+  df %>%
+    summarise(
+      ratio_200K_or_more_avg = mean(ratio_200K_or_more, na.rm = TRUE),
+      ratio_200K_or_more_median = median(ratio_200K_or_more, na.rm = TRUE),
+      ratio_finished_higher_degree_avg = mean(ratio_finished_higher_degree, na.rm = TRUE),
+      ratio_finished_higher_degree_median = median(ratio_finished_higher_degree, na.rm = TRUE),
+      Median_age_years_avg = mean(Median_age_years, na.rm = TRUE),
+      Median_age_years_median = median(Median_age_years, na.rm = TRUE),
+      Male_percentage_avg = mean(Male_percentage, na.rm = TRUE),
+      Male_percentage_median = median(Male_percentage, na.rm = TRUE),
+      Female_percentage_avg = mean(Female_percentage, na.rm = TRUE),
+      Female_percentage_median = median(Female_percentage, na.rm = TRUE)
+    )
+}
+
+summary_problematic <- calculate_summary(merged_problematic)
+summary_non_problematic <- calculate_summary(merged_non_problematic)
+
+# Combine the summaries into a single dataframe
+comparison_summary <- bind_rows(
+  problematic = summary_problematic,
+  non_problematic = summary_non_problematic,
+  .id = "Group"
+)
+
+# Display the resulting dataframe
+print(comparison_summary)
+
+
+```
+
+
+
